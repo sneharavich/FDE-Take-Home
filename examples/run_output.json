@@ -1,0 +1,21 @@
+{
+  "run_id": "09f49bb3-b992-4ef4-9bbf-4b78cd541dd8",
+  "source_uri": "monthly_account_status.parquet",
+  "month": "2025-06-01",
+  "dry_run": true,
+  "status": "succeeded",
+  "counts": {
+    "rows_scanned": 4883,
+    "duplicates_found": 142,
+    "alerts_computed": 165,
+    "alerts_sent": 0,
+    "skipped_replay": 0,
+    "failed_deliveries": 0,
+    "unknown_region_count": 0
+  },
+  "sample_alerts": [],
+  "sample_errors": [],
+  "error_message": null,
+  "created_at": "2026-02-26T20:17:44.946743",
+  "completed_at": "2026-02-26T20:17:45.066334"
+}
