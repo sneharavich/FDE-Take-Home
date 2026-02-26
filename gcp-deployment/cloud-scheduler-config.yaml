@@ -1,0 +1,62 @@
+# Cloud Scheduler configuration for monthly risk alerts
+# Deploy with: gcloud scheduler jobs create http risk-alerts-monthly --config-file=cloud-scheduler-config.yaml
+
+name: projects/PROJECT_ID/locations/us-central1/jobs/risk-alerts-monthly
+description: "Monthly risk alert processing - runs on 2nd of each month at 9 AM ET"
+
+# Schedule: Run at 9 AM Eastern Time on the 2nd of every month
+# Cron format: minute hour day month day-of-week
+schedule: "0 9 2 * *"
+timeZone: "America/New_York"
+
+# Retry configuration
+retryConfig:
+  retryCount: 3
+  maxRetryDuration: 3600s  # 1 hour
+  minBackoffDuration: 60s
+  maxBackoffDuration: 600s
+  maxDoublings: 5
+
+attemptDeadline: 600s  # 10 minutes per attempt
+
+# HTTP target configuration
+httpTarget:
+  uri: "https://risk-alert-service-HASH-uc.a.run.app/runs"
+  httpMethod: POST
+  
+  headers:
+    Content-Type: "application/json"
+    User-Agent: "GCP-Cloud-Scheduler/1.0"
+  
+  body: |
+    {
+      "source_uri": "gs://fde-take-home/monthly_account_status.parquet",
+      "month": "auto",
+      "dry_run": false
+    }
+  
+  # Authentication for Cloud Run
+  oidcToken:
+    serviceAccountEmail: "scheduler@PROJECT_ID.iam.gserviceaccount.com"
+    audience: "https://risk-alert-service-HASH-uc.a.run.app"
+
+---
+# Alternative configuration for using the scheduler.py script via Cloud Run Job
+
+name: projects/PROJECT_ID/locations/us-central1/jobs/risk-alerts-monthly-job
+description: "Monthly risk alert processing via Cloud Run Job"
+
+schedule: "0 9 2 * *"
+timeZone: "America/New_York"
+
+retryConfig:
+  retryCount: 3
+  maxRetryDuration: 3600s
+
+httpTarget:
+  uri: "https://us-central1-run.googleapis.com/v1/projects/PROJECT_ID/locations/us-central1/jobs/risk-alert-job:run"
+  httpMethod: POST
+  
+  oauthToken:
+    serviceAccountEmail: "scheduler@PROJECT_ID.iam.gserviceaccount.com"
+    scope: "https://www.googleapis.com/auth/cloud-platform"

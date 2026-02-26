@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+requests>=2.31
+pyarrow>=14.0
+pandas>=2.1
+# Streaming cloud storage access for scale (replaces google-cloud-storage)
+gcsfs>=2023.12.0  # Streaming GCS access - efficient for large files
+s3fs>=2023.12.0   # Streaming S3 access - efficient for large files
+sqlalchemy>=2.0
+python-dateutil>=2.8
