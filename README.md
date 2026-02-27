@@ -58,36 +58,53 @@ pip install -r requirements.txt
 
 ```bash
 # Terminal 1: Start Mock Slack Server
-source venv/bin/activate
-python mock_slack/server.py
-# Runs on http://127.0.0.1:8001
+source venv/bin/activate          # Windows PowerShell: venv\Scripts\Activate.ps1
+python mock_slack/server.py        # listens on http://127.0.0.1:8001
 
 # Terminal 2: Start Main Service
-source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-# Runs on http://0.0.0.0:8000
+source venv/bin/activate          # or venv\Scripts\Activate.ps1 on Windows
+uvicorn app.main:app --reload      # default port 8000
 
-# Terminal 3: Test
+# Terminal 3: Smoke check
 curl http://localhost:8000/health
 ```
-
 ### Run Your First Alert
 
+Requests are now JSON bodies that match the `RunRequest` model. The `month` field accepts a literal `"auto"` value to process the previous month.
+
 ```bash
-# Preview alerts (no Slack, no DB writes)
-curl -X POST "http://localhost:8000/preview?target_month=2024-06-01&data_path=file://monthly_account_status.parquet"
+# Preview alerts (no Slack delivery, no DB writes)
+curl -X POST http://localhost:8000/preview \
+  -H "Content-Type: application/json" \
+  -d '{
+        "source_uri": "file://monthly_account_status.parquet",
+        "month": "2025-05-01",
+        "dry_run": false
+      }'
 
-# Dry run (saves to DB but doesn't send Slack)
-curl -X POST "http://localhost:8000/runs?target_month=2024-06-01&data_path=file://monthly_account_status.parquet&slack_webhook_url=http://localhost:8001&dry_run=true"
+# Dry run - outcomes are recorded but nothing is sent
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+        "source_uri": "file://monthly_account_status.parquet",
+        "month": "auto",          
+        "dry_run": true
+      }'
 
-# Full run (sends to mock Slack)
-curl -X POST "http://localhost:8000/runs?target_month=2024-06-01&data_path=file://monthly_account_status.parquet&slack_webhook_url=http://localhost:8001"
+# Full run - alerts go to Slack endpoints defined in Config (set via env)
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+        "source_uri": "file://monthly_account_status.parquet",
+        "month": "2025-05-01",
+        "dry_run": false
+      }'
 
-# View run history
-curl http://localhost:8000/runs | jq
+# List runs
+curl http://localhost:8000/runs
 
-# Get specific run
-curl http://localhost:8000/runs/{run_id} | jq
+# Get details for a run
+curl http://localhost:8000/runs/{run_id}
 ```
 
 ## API Endpoints
@@ -109,29 +126,30 @@ Response:
 ```
 
 ### POST /preview
-Preview alerts without sending to Slack or saving to database.
+Compute what alerts *would* be sent for a given month without actually sending any messages or writing to the database. Useful for dry‑running logic.
 
-Query Parameters:
-- `target_month` (required): Month in YYYY-MM-01 format
-- `data_path` (required): Path to Parquet file (file://, gs://, s3://)
-- `arr_threshold` (optional): ARR threshold, default 10000
+**Request body** (JSON):
 
-```bash
-curl -X POST "http://localhost:8000/preview?target_month=2024-06-01&data_path=file://monthly_account_status.parquet"
-```
-
-Response:
 ```json
 {
-  "target_month": "2024-06-01",
-  "total_alerts": 115,
-  "alerts_by_region": {
-    "AMER": 42,
-    "EMEA": 35,
-    "APAC": 38
-  },
-  "unknown_region_count": 0,
-  "sample_alerts": [...],
+  "source_uri": "file://monthly_account_status.parquet",
+  "month": "2024-06-01",     // or "auto" for previous month
+  "dry_run": false              // ignored for preview, kept for uniform type
+}
+```
+
+Example:
+```bash
+curl -X POST http://localhost:8000/preview \
+  -H "Content-Type: application/json" \
+  -d '{"source_uri":"file://monthly_account_status.parquet","month":"2024-06-01"}'
+```
+
+**Successful response**:
+```json
+{
+  "month": "2024-06-01",
+  "alerts": [ /* list of alert objects */ ],
   "stats": {
     "rows_scanned": 5000,
     "duplicates_found": 12
@@ -139,35 +157,50 @@ Response:
 }
 ```
 
+Errors return a JSON object with an `error` field.
+
+
 ### POST /runs
-Execute an alert run (send to Slack and persist outcomes).
+Trigger a run that computes alerts and (unless `dry_run` is true) delivers them to Slack and records outcomes in the database.
 
-Query Parameters:
-- `target_month` (required): Month in YYYY-MM-01 format
-- `data_path` (required): Path to Parquet file
-- `slack_webhook_url` (required): Base Slack webhook URL
-- `dry_run` (optional): If true, skip Slack sending (default: false)
-- `arr_threshold` (optional): ARR threshold, default 10000
+**Request body** (JSON):
 
-```bash
-curl -X POST "http://localhost:8000/runs?target_month=2024-06-01&data_path=file://monthly_account_status.parquet&slack_webhook_url=http://localhost:8001"
-```
-
-Response:
 ```json
 {
-  "run_id": "run_20240601_123456",
-  "status": "completed",
-  "target_month": "2024-06-01",
-  "started_at": "2024-06-01T12:34:56Z",
-  "completed_at": "2024-06-01T12:35:10Z",
-  "total_alerts": 115,
-  "outcomes": {
-    "sent": 110,
+  "source_uri": "file://monthly_account_status.parquet",
+  "month": "2024-06-01",    // or "auto" for previous month
+  "dry_run": false            // skips delivery when true
+}
+```
+
+Example:
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{"source_uri":"file://monthly_account_status.parquet","month":"2024-06-01"}'
+```
+
+**Successful response**:
+```json
+{
+  "run_id": "<uuid>",
+  "status": "succeeded",
+  "source_uri": "file://monthly_account_status.parquet",
+  "month": "2024-06-01",
+  "dry_run": false,
+  "counts": {
+    "rows_scanned": 5000,
+    "duplicates_found": 12,
+    "alerts_computed": 115,
+    "alerts_sent": 110,
     "skipped_replay": 0,
-    "unknown_region": 5,
-    "failed": 0
-  }
+    "failed_deliveries": 0,
+    "unknown_region_count": 5
+  },
+  "sample_alerts": [ /* first 5 sent alerts */ ],
+  "sample_errors": [ /* sample failures */ ],
+  "created_at": "2024-06-01T12:34:56Z",
+  "completed_at": "2024-06-01T12:35:10Z"
 }
 ```
 
@@ -228,6 +261,8 @@ Response:
 |----------|----------|---------|-------------|
 | `ARR_THRESHOLD` | No | `10000` | Minimum ARR to trigger alerts ($10,000) |
 | `DATABASE_URL` | No | `sqlite:///./risk_alerts.db` | SQLite database path |
+| `SLACK_WEBHOOK_URL` | No | *none* | Full Slack webhook endpoint (deprecated; use `SLACK_WEBHOOK_BASE_URL` with region channels)
+| `SLACK_WEBHOOK_BASE_URL` | No | *none* | Base URL used by SlackClient; individual channels appended automatically |
 | `SLACK_RETRY_MAX` | No | `3` | Max Slack retry attempts |
 | `SLACK_RETRY_BACKOFF` | No | `2.0` | Exponential backoff multiplier |
 | `SLACK_RETRY_INITIAL_DELAY` | No | `1.0` | Initial retry delay (seconds) |
@@ -252,12 +287,16 @@ To customize, edit the config before deployment.
 
 ```bash
 # First run: sends alerts
-curl -X POST "http://localhost:8000/runs?target_month=2024-06-01&data_path=file://monthly_account_status.parquet&slack_webhook_url=http://localhost:8001"
-# Result: 115 alerts sent
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{"source_uri":"file://monthly_account_status.parquet","month":"2024-06-01","dry_run":false}'
+# Result: alerts appear in mock_slack_requests.jsonl
 
-# Second run: skips duplicates
-curl -X POST "http://localhost:8000/runs?target_month=2024-06-01&data_path=file://monthly_account_status.parquet&slack_webhook_url=http://localhost:8001"
-# Result: 0 sent, 115 skipped
+# Second run: duplicates are skipped
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{"source_uri":"file://monthly_account_status.parquet","month":"2024-06-01","dry_run":false}'
+# Result: no new webhooks, skipped_replay count increases
 ```
 
 ### Error Handling Test
